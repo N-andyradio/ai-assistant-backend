@@ -1,21 +1,37 @@
+import time
+
 from firebase_client import db
 
 COLLECTION = "data"
+CACHE_SECONDS = 600  # 10분
+
+_cache = {"rows": None, "at": 0.0}
 
 
 def _col():
     return db.collection(COLLECTION)
 
 
+def _invalidate():
+    _cache["rows"] = None
+
+
 def create_data(item):
     doc = {"date": item.date.isoformat(), "value": item.value, "memo": item.memo}
     _, ref = _col().add(doc)
+    _invalidate()
     return {"id": ref.id, **doc}
 
 
 def list_data():
+    now = time.time()
+    if _cache["rows"] is not None and now - _cache["at"] < CACHE_SECONDS:
+        return _cache["rows"]
     docs = _col().order_by("date").stream()
-    return [{"id": d.id, **d.to_dict()} for d in docs]
+    rows = [{"id": d.id, **d.to_dict()} for d in docs]
+    _cache["rows"] = rows
+    _cache["at"] = now
+    return rows
 
 
 def update_data(data_id, item):
@@ -27,6 +43,7 @@ def update_data(data_id, item):
         changes["date"] = changes["date"].isoformat()
     if changes:
         ref.update(changes)
+    _invalidate()
     return {"id": data_id, **ref.get().to_dict()}
 
 
@@ -35,6 +52,7 @@ def delete_data(data_id):
     if not ref.get().exists:
         return False
     ref.delete()
+    _invalidate()
     return True
 
 
